@@ -266,7 +266,6 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -276,7 +275,7 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
-
+	np->mask = p->mask;
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -692,4 +691,43 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int
+trace(int mask)
+{
+	printf("trace call: %d\n", mask);
+	struct proc *p = myproc();
+	p->mask = mask;
+	return 0;
+}
+
+int UNUSED_proc();
+
+int
+sysinfo(struct sysinfo *addr)
+{
+	//printf("%p\n", addr);
+	struct proc *p = myproc();
+	uint64 nproc = UNUSED_proc();
+	uint64 freemem = free_mem_space();
+	if(copyout(p->pagetable, (uint64)addr, (char*)&freemem, sizeof(nproc)) < 0)
+		return -1;
+	if(copyout(p->pagetable, (uint64)addr + sizeof(nproc), (char*)&nproc, sizeof(freemem)) < 0)
+		return -1;
+	//printf("%d %d\n", nproc, freemem);
+	return 0;
+}
+
+
+int UNUSED_proc(){
+	int cnt = 0;
+	struct proc *p;
+	for(p = proc; p < &proc[NPROC]; ++p){
+		acquire(&p->lock);
+		if(proc->state == UNUSED)
+			cnt++;
+		release(&p->lock);
+	}
+	return cnt;
 }
