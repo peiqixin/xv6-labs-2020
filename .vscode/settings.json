@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "defs.h": "c",
+        "riscv.h": "c",
+        "types.h": "c",
+        "user.h": "c",
+        "*.tcc": "c",
+        "exception": "c",
+        "memory_resource": "c",
+        "fstream": "c",
+        "iosfwd": "c",
+        "new": "c",
+        "ostream": "c",
+        "sstream": "c",
+        "streambuf": "c"
+    }
+}
