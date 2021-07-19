@@ -112,10 +112,13 @@ found:
     release(&p->lock);
     return 0;
   }
-
-  // An empty user page table.
+  // 给进程分配页表
   p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
+#ifdef SOL_PGTBL
+  p->kernel_page = kvmcreate();
+#endif
+  // 页表分配失败
+  if (p->pagetable == 0) {
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -141,6 +144,10 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+#ifdef SOL_PGTBL
+  kvmfree(p->kernel_page);
+  p->kernel_page = 0;
+#endif
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -229,7 +236,9 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+#ifdef SOL_PGTBL
+  kvmmapuser(p->kernel_page, p->pagetable, p->sz, 0);
+#endif
   release(&p->lock);
 }
 
@@ -239,9 +248,13 @@ int
 growproc(int n)
 {
   uint sz;
-  struct proc *p = myproc();
-
+  struct proc* p = myproc();
   sz = p->sz;
+#ifdef SOL_PGTBL
+  if (sz + n >= PLIC) {
+    return -1;
+  }
+#endif
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
@@ -249,6 +262,9 @@ growproc(int n)
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
+#ifdef SOL_PGTBL
+  kvmmapuser(p->kernel_page, p->pagetable, sz, p->sz);
+#endif
   p->sz = sz;
   return 0;
 }
@@ -274,7 +290,9 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
+#ifdef SOL_PGTBL
+  kvmmapuser(np->kernel_page, np->pagetable, np->sz, 0);
+#endif
   np->parent = p;
 
   // copy saved user registers.
@@ -473,12 +491,16 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // 切换进程的内核页表
+        w_satp(MAKE_SATP(p->kernel_page));
+        sfence_vma();
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-
+        // 切换至全局kernel
+        kvminithart();
         found = 1;
       }
       release(&p->lock);
