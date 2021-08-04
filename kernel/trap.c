@@ -16,6 +16,8 @@ void kernelvec();
 
 extern int devintr();
 
+int cowfault(pagetable_t pagetable, uint64 va);
+
 void
 trapinit(void)
 {
@@ -67,7 +69,12 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  else if (r_scause() == 15) {
+    if (cowfault(p->pagetable, r_stval()) < 0)
+      p->killed = 1;
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
@@ -218,3 +225,29 @@ devintr()
   }
 }
 
+int cowfault(pagetable_t pagetable, uint64 va) {
+  if (va >= MAXVA)
+    return -1;
+  
+  pte_t* pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+  
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+    return -1;
+  
+  uint64 pa = PTE2PA(*pte);
+  void* mem = kalloc();
+  if (!mem)
+    return -1;
+  
+  // 拷贝页面的内容
+  memmove(mem, (char*)pa, PGSIZE);
+  
+  // 引用计数减一
+  kfree((void*)pa);
+  
+  // uint64 flags = PTE_FLAGS(*pte) | PTE_W;
+  *pte = PA2PTE(mem) | PTE_U | PTE_W | PTE_X | PTE_V | PTE_R;
+  return 0;
+}
