@@ -199,14 +199,21 @@ ialloc(uint dev, short type)
   struct buf *bp;
   struct dinode *dip;
 
-  for(inum = 1; inum < sb.ninodes; inum++){
+  for (inum = 1; inum < sb.ninodes; inum++) {
+    // 获得存储inode的block， 一个block可以存放16个inode
+    // 此处第一次应该会从磁盘读取，接下来会直接从内存块中读取。
     bp = bread(dev, IBLOCK(inum, sb));
-    dip = (struct dinode*)bp->data + inum%IPB;
+    // 获取inode在对应block中的偏移
+    dip = (struct dinode*)bp->data + inum % IPB;
     if(dip->type == 0){  // a free inode
       memset(dip, 0, sizeof(*dip));
       dip->type = type;
+      // bread之后，block相关的信息就被保存在buf中了，这里修改了buf的内容
+      // 调用log_write，如果该block已在log中记录则什么也不做，否则记录在log中。
       log_write(bp);   // mark it allocated on the disk
+      // 调用bread后，bp用完后要调用brelse
       brelse(bp);
+      // 在icache中查找对应的inode
       return iget(dev, inum);
     }
     brelse(bp);
@@ -224,8 +231,10 @@ iupdate(struct inode *ip)
   struct buf *bp;
   struct dinode *dip;
 
+  // memory inode
   bp = bread(ip->dev, IBLOCK(ip->inum, sb));
-  dip = (struct dinode*)bp->data + ip->inum%IPB;
+  // disk inode 
+  dip = (struct dinode*)bp->data + ip->inum % IPB;
   dip->type = ip->type;
   dip->major = ip->major;
   dip->minor = ip->minor;
@@ -262,6 +271,7 @@ iget(uint dev, uint inum)
   if(empty == 0)
     panic("iget: no inodes");
 
+  // 未找到缓存的inode，
   ip = empty;
   ip->dev = dev;
   ip->inum = inum;
@@ -334,7 +344,8 @@ iput(struct inode *ip)
 {
   acquire(&icache.lock);
 
-  if(ip->ref == 1 && ip->valid && ip->nlink == 0){
+  // nlink指的是目录指向该inode
+  if (ip->ref == 1 && ip->valid && ip->nlink == 0) {
     // inode has no links and no other references: truncate and free.
 
     // ip->ref == 1 means no other process can have ip locked,
@@ -345,6 +356,7 @@ iput(struct inode *ip)
 
     itrunc(ip);
     ip->type = 0;
+    // TODO itrunc中已经调用iupdate，这里再次调用是否多余？
     iupdate(ip);
     ip->valid = 0;
 
@@ -681,7 +693,8 @@ namex(char *path, int nameiparent, char *name)
       iunlockput(ip);
       return 0;
     }
-    if(nameiparent && *path == '\0'){
+    // 当前ip指的是父目录
+    if (nameiparent && *path == '\0') {
       // Stop one level early.
       iunlock(ip);
       return ip;

@@ -283,6 +283,37 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+// open ip with lock
+// ip是一个软链接，读取所指的文件的inode并返回
+struct inode* open_symlink(struct inode* ip, int level) {
+  if (level > 10) {
+    return 0;
+  }
+  char path[MAXPATH];
+  // 读取所指向的文件
+  if (readi(ip, 0, (uint64)path, 0, ip->size) != ip->size) {
+    iunlockput(ip);
+    goto bad;
+  }
+  // 释放当前inode
+  iunlockput(ip);
+  // printf("level: %d, %s\n", level, path);
+  // 获得指向文件的inode
+  ip = namei(path);
+  if (!ip) goto bad;
+  
+  ilock(ip);
+  if (ip->type != T_SYMLINK) {
+    return ip;
+  }
+  // return with locked ip
+  return open_symlink(ip, level + 1);
+  
+bad:
+  // 没有查找到对应的文件
+  return 0;
+}
+
 uint64
 sys_open(void)
 {
@@ -313,6 +344,14 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    }
+    // 如果是软链接，O_NOFOLLOW未置位
+    else if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      ip = open_symlink(ip, 1);
+      if (!ip) {
+        end_op();
+        return -1;
+      }
     }
   }
 
@@ -483,4 +522,36 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void) {
+  char target[MAXPATH];
+  char path[MAXPATH];
+  
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+  // printf("create symlink %s -> %s\n", path, target);
+  struct inode* ip;
+  begin_op();
+  // 分配inode
+  ip = create(path, T_SYMLINK, 0, 0);
+  if (!ip) {
+    goto bad;
+  }
+  int n = 0;
+  char* p = target;
+  while (*p) ++p, ++n;
+  // 向当前inode写入目的地址
+  if (writei(ip, 0, (uint64)target, 0, n) != n) {
+    iunlockput(ip);
+    goto bad;
+  }
+  iunlockput(ip);
+  end_op();
+  return 0;
+bad:
+  end_op();
+  return -1;
 }
