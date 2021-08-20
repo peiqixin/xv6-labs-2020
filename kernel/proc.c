@@ -707,7 +707,6 @@ int UNUSED_proc();
 int
 sysinfo(struct sysinfo *addr)
 {
-	//printf("%p\n", addr);
 	struct proc *p = myproc();
 	uint64 nproc = UNUSED_proc();
 	uint64 freemem = free_mem_space();
@@ -715,7 +714,6 @@ sysinfo(struct sysinfo *addr)
 		return -1;
 	if(copyout(p->pagetable, (uint64)addr + sizeof(nproc), (char*)&nproc, sizeof(freemem)) < 0)
 		return -1;
-	//printf("%d %d\n", nproc, freemem);
 	return 0;
 }
 
@@ -725,9 +723,9 @@ int UNUSED_proc(){
 	struct proc *p;
 	for(p = proc; p < &proc[NPROC]; ++p){
 		acquire(&p->lock);
-		if(proc->state == UNUSED)
+		if(p->state != UNUSED)
 			cnt++;
 		release(&p->lock);
-	}
-	return cnt;
+  }
+  return cnt;
 }
