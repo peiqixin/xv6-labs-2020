@@ -21,6 +21,7 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+struct VMA VMAs[16];
 
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
@@ -48,6 +49,8 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
+      p->map_addr = 0x01100000;
+      for (int i = 0; i < 16; ++i) p->VMAs[i].used = 0;
   }
 }
 
@@ -302,6 +305,15 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  // mmap
+  for (int i = 0; i < 16; ++i) {
+    if (p->VMAs[i].used) {
+      filedup(p->VMAs[i].f);
+      uvmcopy_mmap(p->pagetable, np->pagetable, p->VMAs[i].addr, PGROUNDUP(p->VMAs[i].length));
+      np->VMAs[i] = p->VMAs[i];
+    }
+  }
+
   release(&np->lock);
 
   return pid;
@@ -352,7 +364,12 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
-
+  for (int i = 0; i < 16; ++i) {
+    if (p->VMAs[i].used) {
+      // printf("ump %x %x\n", p->VMAs[i].addr, p->VMAs[i].length);
+      uvmunmap_mmap(p->pagetable, p->VMAs[i].addr, PGROUNDUP(p->VMAs[i].length) / PGSIZE);
+    }
+  }
   begin_op();
   iput(p->cwd);
   end_op();

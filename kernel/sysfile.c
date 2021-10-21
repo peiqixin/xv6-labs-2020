@@ -487,10 +487,89 @@ sys_pipe(void)
 
 uint64
 sys_mmap(void) {
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+  argaddr(0, &addr);
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, &offset);
+  struct proc *p = myproc();
+  for (int i = 0; i < 16; ++i) {
+    if (p->VMAs[i].used == 0) {
+      
+      struct VMA* vma = &p->VMAs[i];
+      vma->f = p->ofile[fd];
+      vma->prot = prot;
+      vma->flags = flags;
+      vma->length = length;
+      if (addr == 0) {
+        addr = p->map_addr;
+      }
+      // if ((prot & PROT_READ) && vma->f->readable == 0) return -1;
+      if ((prot & PROT_WRITE) && vma->f->writable == 0) {
+        return -1;
+      }
+      uint64 sz = uvmalloc(p->pagetable, addr, addr + length);
+      // printf("map %x %x\n", addr, length);
+      if (sz == 0) return -1;
+      vma->used = 1;
+      // TODO offset rollback
+      vma->f->off = offset;
+      vma->addr = addr;
+      vma->offset = offset;
+      p->map_addr += PGROUNDUP(length);
+      filedup(vma->f);
+      for (;length > 0;) {
+        fileread(vma->f, addr, length > PGSIZE ? PGSIZE : length);
+        length -= (length > PGSIZE ? PGSIZE : length);
+        addr += (length > PGSIZE ? PGSIZE : length);
+      }
+      return vma->addr;
+    }
+  }
   return -1;
 }
 
 uint64
 sys_munmap(void) {
-  return -1;
+  uint64 addr;
+  int length;
+  argaddr(0, &addr);
+  argint(1, &length);
+  struct proc *p = myproc();
+  // find VMA
+  struct VMA *vma = 0;
+  for (int i = 0; i < 16; ++i) {
+    if (p->VMAs[i].used && p->VMAs[i].addr <= addr && addr <= p->VMAs[i].addr + p->VMAs[i].length) {
+      vma = &p->VMAs[i];
+      break;
+    }
+  }
+  if (!vma) {
+    printf("not found VMA for %p\n", addr);
+    return -1;
+  }
+  // write back to file
+  struct file *f = vma->f;
+  if (vma->flags == MAP_SHARED) {
+    uint offset = f->off;
+    struct stat st;
+    filestat(f, (uint64)&st);
+    if (addr - vma->addr < st.size) {
+      f->off = vma->offset;
+      filewrite(f, vma->addr, length);
+      // printf("write back %d %d\n", vma->addr, length);
+      f->off = offset;
+    }
+  }
+  // if this VMA completely removed, close file
+  if (addr + length >= vma->addr + vma->length) {
+    fileclose(f);
+    vma->used = 0;
+  }
+  uvmunmap(p->pagetable,addr, (PGROUNDUP(addr + length) - addr) / PGSIZE, 1);
+  
+  return vma->addr;
 }

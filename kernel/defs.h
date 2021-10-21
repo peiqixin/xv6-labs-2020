@@ -171,6 +171,8 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+int             uvmcopy_mmap(pagetable_t old, pagetable_t new, uint64 start, uint64 sz);
+void            uvmunmap_mmap(pagetable_t pagetable, uint64 va, uint64 npages);
 
 // plic.c
 void            plicinit(void);
